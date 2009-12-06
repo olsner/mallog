@@ -23,8 +23,17 @@ void (*g_freep)(void*) = 0;
 void init() __attribute__((constructor));
 void fini() __attribute__((destructor));
 
-static void wri(int fd, const void* p, size_t size)
+static void openlog();
+
+static void writ(const void* p, size_t size)
 {
+	if (!g_logfd)
+	{
+		openlog();
+		if (!g_logfd)
+			return;
+	}
+	int fd = g_logfd;
 	while (size)
 	{
 		ssize_t written = write(fd, p, size);
@@ -35,7 +44,7 @@ static void wri(int fd, const void* p, size_t size)
 			else
 			{
 				perror("malloc: write");
-				exit(1);
+				_exit(1);
 			}
 		}
 		else
@@ -46,7 +55,41 @@ static void wri(int fd, const void* p, size_t size)
 	}
 }
 
-#define wr(p,c) do { if (!g_logfd) openlog(); if (g_logfd) wri(g_logfd, (p),(c)*sizeof(uintptr_t)); } while (0)
+#define TEMP_BUFFER_SIZE 16384
+static char g_temp_buffer[TEMP_BUFFER_SIZE];
+static size_t g_temp_length;
+
+static void flush()
+{
+	if (g_temp_length)
+	{
+		writ(g_temp_buffer, g_temp_length);
+		g_temp_length = 0;
+	}
+}
+
+static void wri(const void* p, size_t size)
+{
+	while (size)
+	{
+		size_t to_write = TEMP_BUFFER_SIZE - g_temp_length;
+		if (to_write)
+		{
+			if (to_write > size)
+				to_write = size;
+			memcpy(g_temp_buffer + g_temp_length, p, to_write);
+			g_temp_length += to_write;
+			size -= to_write;
+			p = (char*)p + to_write;
+		}
+		else
+		{
+			flush();
+		}
+	}
+}
+
+#define wr(p,c) do { wri((p),(c)*sizeof(uintptr_t)); } while (0)
 
 static void openlog()
 {
@@ -54,11 +97,15 @@ static void openlog()
 	snprintf(buffer, sizeof(buffer), "/tmp/mallog.%d.dat", getpid());
 	//printf("Logging allocations to %s...\n", buffer);
 
-	g_logfd = open(buffer, O_APPEND | O_CLOEXEC | O_CREAT | O_WRONLY, 0660);
-	if (g_logfd == -1)
+	int fd = open(buffer, O_APPEND | O_CLOEXEC | O_CREAT | O_WRONLY, 0660);
+	if (fd == -1)
 	{
 		perror("mallog: open log");
-		exit(1);
+		_exit(1);
+	}
+	else
+	{
+		g_logfd = fd;
 	}
 
 	// Output some stats about the current process to log?
@@ -80,6 +127,7 @@ void fini()
 {
 	if (g_logfd)
 	{
+		flush();
 		while (close(g_logfd) && errno != EBADF)
 			perror("mallog: close g_logfd");
 		g_logfd = 0;
