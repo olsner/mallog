@@ -18,5 +18,4 @@ Convert: Convert.hs
 
 clean:
 	rm -f mallog.so
-	rm -f mallog2.so
 	rm -f benchmark
