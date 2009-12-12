@@ -17,13 +17,16 @@ static char g_bootheap[BOOT_HEAP_SIZE] __attribute__((aligned(8)));
 static char* g_bootfree = 0;
 static char *const g_bootend = g_bootheap + BOOT_HEAP_SIZE;
 
-void *(*g_mallocp)(size_t) = 0;
-void (*g_freep)(void*) = 0;
+static void *(*g_mallocp)(size_t) = 0;
+static void *(*g_reallocp)(void*, size_t) = 0;
+static void (*g_freep)(void*) = 0;
 
 void init() __attribute__((constructor));
 void fini() __attribute__((destructor));
 
 static void openlog();
+static void* log_malloc(void* ptr, size_t size);
+static void log_free(void* ptr);
 
 static void writ(const void* p, size_t size)
 {
@@ -111,15 +114,19 @@ static void openlog()
 	// Output some stats about the current process to log?
 }
 
+#define GRAB(name, type) \
+	void* name##p = dlsym(RTLD_NEXT, #name); \
+	assert(name##p && name##p != name); \
+	g_##name##p = (type)name##p
+
 void init()
 {
 	g_bootfree = g_bootheap;
-	void* mallocp = dlsym(RTLD_NEXT, "malloc");
-	void* freep = dlsym(RTLD_NEXT, "free");
-	assert(mallocp && mallocp != malloc);
-	assert(freep && freep != free);
-	g_mallocp = (void*(*)(size_t))mallocp;
-	g_freep = (void(*)(void*))freep;
+
+	GRAB(malloc,	void*(*)(size_t));
+	GRAB(free,		void(*)(void*));
+	GRAB(realloc,	void*(*)(void*, size_t));
+
 	g_bootfree = 0;
 }
 
@@ -152,7 +159,11 @@ void *malloc(size_t size)
 		init();
 	}
 
-	void *ptr = g_mallocp(size);
+	return log_malloc(g_mallocp(size), size);
+}
+
+void* log_malloc(void* ptr, size_t size)
+{
 	uintptr_t log[2] = { (size << 1) | 1, uintptr_t(ptr) };
 	wr(log, 2);
 	return ptr;
@@ -160,12 +171,21 @@ void *malloc(size_t size)
 
 void* calloc(size_t n, size_t sz)
 {
-	size_t size = n*sz;
-	/*if (size / n != sz || size / sz != n)
-		return NULL;*/
+	size_t size = n * sz;
 	void* ptr = malloc(size);
 	memset(ptr, 0, size);
 	return ptr;
+}
+
+void* realloc(void* ptr, size_t new_size)
+{
+	void* ret = g_reallocp(ptr, new_size);
+	if (ret)
+	{
+		log_free(ptr);
+		log_malloc(ret, new_size);
+	}
+	return ret;
 }
 
 void free(void *ptr)
@@ -176,7 +196,12 @@ void free(void *ptr)
 	if (ptr >= g_bootheap && ptr <= g_bootend)
 		return;
 
+	log_free(ptr);
+	g_freep(ptr);
+}
+
+void log_free(void* ptr)
+{
 	uintptr_t log[2] = { 0, uintptr_t(ptr) };
 	wr(log, 2);
-	g_freep(ptr);
 }
