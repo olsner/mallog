@@ -94,6 +94,19 @@ static void wri(const void* p, size_t size)
 
 #define wr(p,c) do { wri((p),(c)*sizeof(uintptr_t)); } while (0)
 
+static void log_free(void* ptr)
+{
+	uintptr_t log[2] = { 0, uintptr_t(ptr) };
+	wr(log, 2);
+}
+
+static void* log_malloc(void* ptr, size_t size)
+{
+	uintptr_t log[2] = { (size << 1) | 1, uintptr_t(ptr) };
+	wr(log, 2);
+	return ptr;
+}
+
 static void openlog()
 {
 	char buffer[64];
@@ -123,9 +136,9 @@ void init()
 {
 	g_bootfree = g_bootheap;
 
-	GRAB(malloc,	void*(*)(size_t));
-	GRAB(free,		void(*)(void*));
-	GRAB(realloc,	void*(*)(void*, size_t));
+	GRAB(malloc, void*(*)(size_t));
+	GRAB(free, void(*)(void*));
+	GRAB(realloc, void*(*)(void*, size_t));
 
 	g_bootfree = 0;
 }
@@ -162,13 +175,6 @@ void *malloc(size_t size)
 	return log_malloc(g_mallocp(size), size);
 }
 
-void* log_malloc(void* ptr, size_t size)
-{
-	uintptr_t log[2] = { (size << 1) | 1, uintptr_t(ptr) };
-	wr(log, 2);
-	return ptr;
-}
-
 void* calloc(size_t n, size_t sz)
 {
 	size_t size = n * sz;
@@ -190,18 +196,9 @@ void* realloc(void* ptr, size_t new_size)
 
 void free(void *ptr)
 {
-	if (!ptr)
-		return;
-
-	if (ptr >= g_bootheap && ptr <= g_bootend)
-		return;
-
-	log_free(ptr);
-	g_freep(ptr);
-}
-
-void log_free(void* ptr)
-{
-	uintptr_t log[2] = { 0, uintptr_t(ptr) };
-	wr(log, 2);
+	if (ptr)
+	{
+		log_free(ptr);
+		g_freep(ptr);
+	}
 }
