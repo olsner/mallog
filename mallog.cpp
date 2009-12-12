@@ -11,11 +11,7 @@
 #include <assert.h>
 
 static int g_logfd = 0;
-
-#define BOOT_HEAP_SIZE 32
-static char g_bootheap[BOOT_HEAP_SIZE] __attribute__((aligned(8)));
-static char* g_bootfree = 0;
-static char *const g_bootend = g_bootheap + BOOT_HEAP_SIZE;
+static bool g_during_init = 0;
 
 static void *(*g_mallocp)(size_t) = 0;
 static void *(*g_reallocp)(void*, size_t) = 0;
@@ -134,13 +130,13 @@ static void openlog()
 
 void init()
 {
-	g_bootfree = g_bootheap;
+	g_during_init = true;
 
 	GRAB(malloc, void*(*)(size_t));
 	GRAB(free, void(*)(void*));
 	GRAB(realloc, void*(*)(void*, size_t));
 
-	g_bootfree = 0;
+	g_during_init = false;
 }
 
 void fini()
@@ -156,19 +152,15 @@ void fini()
 
 void *malloc(size_t size)
 {
-	if (g_bootfree)
+	if (g_during_init)
 	{
-		void* ret = g_bootfree;
-		g_bootfree += size;
-		assert(g_bootheap <= g_bootfree && g_bootfree <= g_bootend);
-		//printf("Boot malloc: %lu (now %lu used)\n", (long)size, long(g_bootfree - g_bootheap));
-		return ret;
+		return NULL;
 	}
 
 	if (!g_mallocp)
 	{
-		// This may recursively call malloc, but that's OK because it will also
-		// set up a temporary heap that will be used by the check above.
+		// This may recursively call malloc, but that's OK because we check if
+		// we're init init above.
 		init();
 	}
 
@@ -179,7 +171,7 @@ void* calloc(size_t n, size_t sz)
 {
 	size_t size = n * sz;
 	void* ptr = malloc(size);
-	memset(ptr, 0, size);
+	if (ptr) memset(ptr, 0, size);
 	return ptr;
 }
 
