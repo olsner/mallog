@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-CXXFLAGS = -fpic -DPIC -fvisibility=hidden -O3 -fno-rtti -fno-exceptions -Wall
+CXXFLAGS = -fpic -DPIC -fvisibility=hidden -O2 -g -fno-rtti -fno-exceptions -Wall
 LDFLAGS = -lrt -ldl
 LDSOFLAGS = $(LDFLAGS) -Wl,-no-undefined
 GHCFLAGS = -O2 -fvia-c
